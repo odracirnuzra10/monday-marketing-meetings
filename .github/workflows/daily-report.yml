@@ -1,0 +1,30 @@
+name: Reporte Diario Reuniones Marketing
+
+on:
+  # Ejecutar de lunes a viernes a las 21:00 UTC = 18:00 Chile (UTC-3)
+  schedule:
+    - cron: '0 21 * * 1-5'
+
+  # Permitir ejecución manual para pruebas
+  workflow_dispatch:
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Ejecutar reporte
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          GOOGLE_CHAT_WEBHOOK: ${{ secrets.GOOGLE_CHAT_WEBHOOK }}
+          MONDAY_BOARD_ID: ${{ vars.MONDAY_BOARD_ID || '18403745516' }}
+        run: python main.py
