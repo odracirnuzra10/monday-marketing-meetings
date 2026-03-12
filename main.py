@@ -271,6 +271,7 @@ def analyze(items: list) -> dict:
         "total": len(items),
         "total_realizadas": len(realizadas),
         "total_programadas": len(programadas),
+        "items_realizadas": realizadas,
         "por_ejecutivo": dict(por_ejecutivo),
         "por_tipo": dict(por_tipo),
         "avg_rating": avg_rating,
@@ -284,159 +285,72 @@ def analyze(items: list) -> dict:
 
 
 # ─── Formateo del mensaje ───────────────────────────────────────
+def summarize_hitos(items_realizadas: list) -> str:
+    """Resume los hitos de un ejecutivo en una frase corta."""
+    hitos = [i["hitos"].strip() for i in items_realizadas if i["hitos"] and i["hitos"].strip()]
+    if not hitos:
+        return "sin notas importantes"
+    # Concatenar todos los hitos y truncar a algo legible
+    combined = ". ".join(h.replace("\n", " ").strip() for h in hitos)
+    if len(combined) > 120:
+        combined = combined[:117] + "..."
+    return combined.lower()
+
+
 def format_report(analysis: dict) -> str:
-    """Genera el mensaje formateado para Google Chat."""
+    """Genera el mensaje breve para Google Chat."""
     now = analysis["now"]
     day_names = {
         0: "Lunes", 1: "Martes", 2: "Miércoles",
         3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"
     }
-    month_names = {
-        1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
-        5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
-        9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
-    }
     day_name = day_names[now.weekday()]
-    month_name = month_names[now.month]
-    date_str = f"{day_name} {now.day} de {month_name} {now.year}"
+    date_str = f"{day_name} {now.day}/{now.month:02d}"
 
     lines = []
 
     # ── Header ──
-    lines.append("📊 *REPORTE DIARIO - REUNIONES MARKETING*")
-    lines.append(f"📅 {date_str} | {now.strftime('%H:%M')} hrs Chile")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append(f"📊 *Reuniones Marketing* — {date_str}")
+    lines.append(f"✅ {analysis['total_realizadas']} realizadas | 📅 {analysis['total_programadas']} programadas | ⭐ {analysis['avg_rating']:.1f}/5 promedio")
     lines.append("")
 
-    # ── Resumen General ──
-    lines.append(f"📈 *RESUMEN GENERAL*")
-    lines.append(f"• Total reuniones: {analysis['total']}")
-    lines.append(f"• ✅ Realizadas: {analysis['total_realizadas']}")
-    lines.append(f"• 📅 Programadas: {analysis['total_programadas']}")
-    if analysis["avg_rating"] > 0:
-        stars = "⭐" * round(analysis["avg_rating"])
-        lines.append(f"• Satisfacción promedio: {analysis['avg_rating']:.1f}/5 {stars}")
-    lines.append("")
-
-    # ── Por Ejecutivo ──
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("👥 *REUNIONES POR EJECUTIVO*")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("")
-
-    emojis = {"Brian": "🟢", "Francis": "🔵", "Franco": "🟣", "Daniel": "🟡", "Eduardo": "🟠"}
-
-    # Ordenar por cantidad de reuniones realizadas
+    # ── Una línea por ejecutivo ──
     sorted_execs = sorted(
         analysis["por_ejecutivo"].items(),
         key=lambda x: x[1]["realizadas"],
         reverse=True,
     )
 
+    # Recopilar items realizados por ejecutivo para extraer hitos
+    realizadas_por_exec = defaultdict(list)
+    for item in analysis.get("items_realizadas", []):
+        name = item["exec_name"] or "Sin asignar"
+        realizadas_por_exec[name].append(item)
+
     for exec_name, data in sorted_execs:
-        emoji = emojis.get(exec_name.split(" ")[0], "⚪")
-        total_exec = data["realizadas"] + data["programadas"]
-        avg_exec = analysis["ranking_satisfaccion"].get(exec_name, 0)
+        avg = analysis["ranking_satisfaccion"].get(exec_name, 0)
+        avg_str = f"{avg:.1f}" if avg > 0 else "s/d"
+        nota = summarize_hitos(realizadas_por_exec.get(exec_name, []))
+        lines.append(f"*{exec_name}*: {data['realizadas']} reuniones, {avg_str} de satisfacción, {nota}")
 
-        lines.append(f"{emoji} *{exec_name}* ({total_exec} reuniones)")
-        lines.append(f"   ✅ Realizadas: {data['realizadas']} | 📅 Programadas: {data['programadas']}")
-
-        if avg_exec > 0:
-            stars_exec = "⭐" * round(avg_exec)
-            lines.append(f"   Satisfacción: {avg_exec:.1f}/5 {stars_exec}")
-
-        if data["clientes"]:
-            clientes_str = ", ".join(data["clientes"][:4])
-            if len(data["clientes"]) > 4:
-                clientes_str += f" (+{len(data['clientes']) - 4} más)"
-            lines.append(f"   Clientes: {clientes_str}")
-
-        lines.append("")
-
-    # ── Por Tipo de Reunión ──
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("🏷️ *REUNIONES POR TIPO*")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("")
-
-    tipo_emojis = {
-        "Ventas": "💰",
-        "Marketing": "📣",
-        "Administración": "📋",
-        "Retención": "🔄",
-    }
-
-    for tipo, data in sorted(analysis["por_tipo"].items(), key=lambda x: x[1]["realizadas"], reverse=True):
-        emoji_tipo = tipo_emojis.get(tipo, "📌")
-        total_tipo = data["realizadas"] + data["programadas"]
-        lines.append(f"{emoji_tipo} *{tipo}*: {total_tipo} total (✅ {data['realizadas']} realizadas | 📅 {data['programadas']} programadas)")
-
-    lines.append("")
-
-    # ── Reuniones de Hoy ──
-    if analysis["reuniones_hoy"]:
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("🔔 *REUNIONES DE HOY*")
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("")
-        for item in analysis["reuniones_hoy"]:
-            exec_short = item["exec_name"] or "Sin asignar"
-            lines.append(f"• {item['cliente']} → {exec_short} ({item['tipo_reunion']})")
-        lines.append("")
-
-    # ── Próximas Reuniones ──
-    if analysis["proximas"]:
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("📅 *PRÓXIMAS REUNIONES (7 días)*")
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("")
-        for item in analysis["proximas"]:
-            dias = item["dias_faltan"]
-            cuando = "HOY" if dias == 0 else f"mañana" if dias == 1 else f"en {dias} días"
-            exec_short = item["exec_name"] or "Sin asignar"
-            lines.append(f"• {item['fecha']} ({cuando}) → {item['cliente']} - {exec_short}")
-        lines.append("")
-
-    # ── Hitos Recientes ──
-    hitos_recientes = analysis["con_hitos"][:5]
-    if hitos_recientes:
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("🎯 *HITOS CLAVE RECIENTES*")
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("")
-        for item in hitos_recientes:
-            hitos_short = item["hitos"][:120]
-            if len(item["hitos"]) > 120:
-                hitos_short += "..."
-            lines.append(f"• *{item['cliente']}* ({item['exec_name'] or 'N/A'})")
-            lines.append(f"  {hitos_short}")
-        lines.append("")
-
-    # ── Indicadores ──
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("📊 *INDICADORES*")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("")
-
-    # Ejecutivo más activo
-    if sorted_execs:
-        top_exec = sorted_execs[0]
-        lines.append(f"🏆 Más activo: *{top_exec[0]}* con {top_exec[1]['realizadas']} reuniones realizadas")
-
-    # Mejor satisfacción
-    if analysis["ranking_satisfaccion"]:
-        best = max(analysis["ranking_satisfaccion"].items(), key=lambda x: x[1])
-        lines.append(f"⭐ Mejor satisfacción: *{best[0]}* con {best[1]:.1f}/5")
-
-    # Tipo más frecuente
+    # ── Tipos (una línea compacta) ──
     if analysis["por_tipo"]:
-        top_tipo = max(analysis["por_tipo"].items(), key=lambda x: x[1]["realizadas"])
-        lines.append(f"📌 Tipo más frecuente: *{top_tipo[0]}* ({top_tipo[1]['realizadas']} reuniones)")
+        lines.append("")
+        tipos_parts = []
+        for tipo, data in sorted(analysis["por_tipo"].items(), key=lambda x: x[1]["realizadas"], reverse=True):
+            tipos_parts.append(f"{tipo}: {data['realizadas']}")
+        lines.append(f"🏷️ {' | '.join(tipos_parts)}")
+
+    # ── Próximas (solo si hay) ──
+    if analysis["proximas"]:
+        lines.append("")
+        lines.append(f"📅 *Próximas:*")
+        for item in analysis["proximas"][:5]:
+            exec_short = item["exec_name"] or "?"
+            lines.append(f"• {item['fecha']} → {item['cliente']} ({exec_short})")
 
     lines.append("")
-    lines.append(f"🔗 <https://metricads-chile.monday.com/boards/{BOARD_ID}|Ver tablero en Monday.com>")
-    lines.append("")
-    lines.append("_🤖 Reporte generado automáticamente | Reuniones Marketing - METRICADS_")
+    lines.append(f"🔗 <https://metricads-chile.monday.com/boards/{BOARD_ID}|Ver tablero>")
 
     return "\n".join(lines)
 
